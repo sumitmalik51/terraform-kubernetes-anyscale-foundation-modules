@@ -18,6 +18,11 @@ variable "azure_subscription_id" {
   type        = string
 }
 
+variable "azure_tenant_id" {
+  description = "(Required) Azure tenant ID. Can be found by running `az account show --query tenantId -o tsv`."
+  type        = string
+}
+
 variable "existing_resource_group_name" {
   description = <<-EOT
     (Required) Existing Resource Group name.

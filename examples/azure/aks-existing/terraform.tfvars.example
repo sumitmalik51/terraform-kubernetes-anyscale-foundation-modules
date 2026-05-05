@@ -8,6 +8,7 @@
 # ---------------------------------------------------------------------------------------------------------------------
 
 azure_subscription_id = "00000000-0000-0000-0000-000000000000"
+azure_tenant_id       = "00000000-0000-0000-0000-000000000000" # az account show --query tenantId -o tsv
 
 # Existing Resource Group where your AKS cluster is deployed
 existing_resource_group_name = "my-aks-resource-group"

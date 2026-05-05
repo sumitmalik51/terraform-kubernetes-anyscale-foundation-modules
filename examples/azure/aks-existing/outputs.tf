@@ -30,17 +30,19 @@ locals {
     "--region ${data.azurerm_resource_group.existing.location}",
     "--provider azure",
     "--compute-stack k8s",
-    "--cloud-storage-bucket-name 'azure://${azurerm_storage_container.blob.name}'",
+    "--azure-tenant-id ${var.azure_tenant_id}",
+    "--anyscale-operator-iam-identity ${azurerm_user_assigned_identity.anyscale_operator.principal_id}",
+    "--cloud-storage-bucket-name 'abfss://${azurerm_storage_container.blob.name}@${azurerm_storage_account.sa.name}.dfs.core.windows.net'",
     "--cloud-storage-bucket-endpoint 'https://${azurerm_storage_account.sa.name}.blob.core.windows.net'",
   ])
 
   helm_upgrade_command_parts = compact([
     "helm upgrade anyscale-operator anyscale/anyscale-operator",
     "--set-string global.cloudDeploymentId=<cloud-deployment-id>",
-    "--set-string global.azure.region=${data.azurerm_resource_group.existing.location}",
+    "--set-string global.controlPlaneURL=https://console.azure.anyscale.com",
     "--set-string global.cloudProvider=azure",
     "--set-string global.auth.iamIdentity=${azurerm_user_assigned_identity.anyscale_operator.client_id}",
-    "--set-string workloads.serviceAccount.name=anyscale-operator",
+    "--set-string global.auth.audience=api://086bc555-6989-4362-ba30-fded273e432b/.default",
     "--namespace ${var.anyscale_operator_namespace}",
     "--create-namespace",
     "-i"
