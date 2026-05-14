@@ -34,13 +34,24 @@ Steps for deploying Anyscale resources via Terraform:
 
 * Review variables.tf and (optionally) create a `terraform.tfvars` file to override any of the defaults.
 e.g. 
-```sh
-azure_tenant_id = "" # az account show --query tenantId -o tsv
+```hcl
+azure_tenant_id       = "" # az account show --query tenantId -o tsv
 azure_subscription_id = ""
-azure_location = ""
-aks_cluster_name = ""
-node_group_gpu_types = ["T4"]
-enable_nfs            = true
+azure_location        = ""
+aks_cluster_name      = ""
+
+# (Optional) Override the default GPU node pools. The default provisions
+# both T4 and A100 pools; the example below restricts it to T4 only.
+# Set to `{}` for a CPU-only cluster. Each entry's `name` must be lowercase
+# alphanumeric and <= 8 characters (spot pools append "spot").
+gpu_pool_configs = {
+  T4 = {
+    name         = "gput4"
+    vm_size      = "Standard_NC16as_T4_v3"
+    product_name = "NVIDIA-T4"
+    gpu_count    = "1"
+  }
+}
 ```
 
 * Apply the terraform
@@ -83,22 +94,7 @@ kubectl wait --for=condition=available deployment/envoy-gateway \
 
 A sample manifest, `sample-envoy-gateway.yaml`, has been provided in this repo. It contains three resources: an `EnvoyProxy` (with Azure load-balancer annotations), a `GatewayClass` named `eg`, and a `Gateway` named `gateway` in the `anyscale-operator` namespace with HTTP/HTTPS listeners.
 
-The Gateway listeners reference TLS Secrets whose names embed the Anyscale cloud deployment ID (`<cldrsrc-id>`), so apply this manifest **after** running `anyscale cloud register` further down in this guide. The `anyscale-operator` namespace must also exist before applying the Gateway (the `--create-namespace` flag on the operator install handles that; you can also create it ahead of time with `kubectl create namespace anyscale-operator`).
-
-Once the cloud deployment ID is known, substitute `<cldrsrc-id>` with the **dash-form** of the ID (Kubernetes Secret names can't contain underscores, so the operator stores the cert as `anyscale-cldrsrc-<dash-form>-certificate`). The easiest way is to pipe through `sed` and `tr`:
-
-```shell
-CLOUD_ID=cldrsrc_xxx  # value from `anyscale cloud register`
-sed "s/<cldrsrc-id>/$(echo $CLOUD_ID | tr _ -)/g" sample-envoy-gateway.yaml \
-  | kubectl apply -f -
-```
-
-Retrieve the Gateway's load-balancer hostname for the operator install:
-
-```shell
-kubectl get gateway gateway -n anyscale-operator \
-  -o jsonpath='{.status.addresses[0].value}'
-```
+The Gateway listeners reference TLS Secrets whose names embed the Anyscale cloud deployment ID, so the manifest is applied **after** running `anyscale cloud register` further down. For now, only the helm install above is needed; the [Apply Envoy Gateway Resources](#apply-envoy-gateway-resources) step below picks it back up once you have the cloud deployment ID.
 
 #### (Optional) Install the Nvidia device plugin
 
@@ -158,6 +154,31 @@ anyscale cloud register \
   --anyscale-operator-iam-identity ...  \
   --cloud-storage-bucket-name 'azure://...' \
   --cloud-storage-bucket-endpoint 'https://....blob.core.windows.net'
+```
+
+Note the **cloud deployment ID** (`cldrsrc_...`) printed at the end — you'll need it for the next two steps.
+
+### Apply Envoy Gateway Resources
+
+Create the operator namespace if it doesn't already exist:
+
+```shell
+kubectl create namespace anyscale-operator
+```
+
+Substitute `<cldrsrc-id>` in `sample-envoy-gateway.yaml` with the **dash-form** of the cloud deployment ID from the previous step. Kubernetes Secret names can't contain underscores, so the operator stores the cert as `anyscale-cldrsrc-<dash-form>-certificate`. The easiest way is to pipe through `sed` and `tr`:
+
+```shell
+CLOUD_ID=cldrsrc_xxx  # value from `anyscale cloud register`
+sed "s/<cldrsrc-id>/$(echo $CLOUD_ID | tr _ -)/g" sample-envoy-gateway.yaml \
+  | kubectl apply -f -
+```
+
+Retrieve the Gateway's load-balancer address for the operator install:
+
+```shell
+kubectl get gateway gateway -n anyscale-operator \
+  -o jsonpath='{.status.addresses[0].value}'
 ```
 
 ### Install the Anyscale Operator
