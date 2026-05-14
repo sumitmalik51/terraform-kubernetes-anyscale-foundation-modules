@@ -112,7 +112,7 @@ output "memorydb_endpoint" {
 }
 
 #####################################################################
-# Rendered post-apply deployment script — ordered list of every
+# Rendered post-terraform deployment script — ordered list of every
 # helm/kubectl/anyscale command to run after `terraform apply`.
 # Because this example uses an existing EKS cluster, you'll need to
 # substitute <eks_cluster_name>, <anyscale_cloud_name>, and
@@ -122,7 +122,7 @@ output "memorydb_endpoint" {
 locals {
   deploy_script = <<-EOT
     #!/usr/bin/env bash
-    # Anyscale on an existing EKS cluster — post-apply deployment commands.
+    # Anyscale on an existing EKS cluster — post-terraform deployment commands.
     #
     # Substitute <eks_cluster_name>, <anyscale_cloud_name>, and
     # <node_IAM_role_arn> below before running. Steps 5-8 also depend on
@@ -273,6 +273,6 @@ resource "local_file" "deploy_script" {
 }
 
 output "deploy_script_path" {
-  description = "Path to a rendered shell script containing every post-`terraform apply` step in order (autoscaler, AWS LBC, optional S3 CSI addon, Envoy Gateway + manifests, PVC, Anyscale Operator, verify). Open it to copy-paste steps after substituting the BYO placeholders (<eks_cluster_name>, <anyscale_cloud_name>, <node_IAM_role_arn>)."
+  description = "Path to a rendered shell script containing every post-terraform step in order (autoscaler, AWS LBC, optional S3 CSI addon, Envoy Gateway + manifests, PVC, Anyscale Operator, verify). Open it to copy-paste steps after substituting the BYO placeholders (<eks_cluster_name>, <anyscale_cloud_name>, <node_IAM_role_arn>)."
   value       = local_file.deploy_script.filename
 }

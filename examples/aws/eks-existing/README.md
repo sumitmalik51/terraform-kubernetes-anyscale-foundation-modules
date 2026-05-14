@@ -39,6 +39,13 @@ terraform apply
 
 If you are using a `tfvars` file, you will need to update the above commands accordingly.
 
+`terraform apply` writes the following files into `./generated/` for use in later steps:
+
+* `generated/pv-pvc.yaml` — applied via `kubectl` when `enable_s3_pvc = true`.
+* `generated/deploy.sh` — an executable shell script that runs every post-terraform step in order (cloud register → kubectl/helm installs → verify). Use it to drive the full flow end-to-end, or copy-paste sections of it.
+
+> **Tip — drive the post-terraform steps from `generated/deploy.sh`.** The script wraps every step in this README (Register → Install autoscaler/LBC/Envoy Gateway → (optional) S3 CSI addon + PVC → Install Operator → Verify) in order. Because this example targets a BYO EKS cluster, you'll need to substitute the placeholders inside the script (`<eks_cluster_name>`, `<anyscale_cloud_name>`, `<node_IAM_role_arn>`) before running it. Either run it end-to-end (`./generated/deploy.sh`) or open it side-by-side with this README and copy-paste step by step.
+
 ### Register the Anyscale Cloud
 
 Ensure that you are logged into Anyscale with valid CLI credentials (`anyscale login`). Registration runs against the Anyscale control plane only — no cluster connectivity required — and returns a `cldrsrc_…` cloud deployment id that the next steps use.
@@ -324,7 +331,7 @@ The `https-session` listener will remain `ResolvedRefs: False` until you launch 
 | Name | Description |
 | ---- | ----------- |
 | <a name="output_anyscale_registration_command"></a> [anyscale\_registration\_command](#output\_anyscale\_registration\_command) | The Anyscale registration command. |
-| <a name="output_deploy_script_path"></a> [deploy\_script\_path](#output\_deploy\_script\_path) | Path to a rendered shell script containing every post-`terraform apply` step in order (autoscaler, AWS LBC, optional S3 CSI addon, Envoy Gateway + manifests, PVC, Anyscale Operator, verify). Open it to copy-paste steps after substituting the BYO placeholders (<eks\_cluster\_name>, <anyscale\_cloud\_name>, <node\_IAM\_role\_arn>). |
+| <a name="output_deploy_script_path"></a> [deploy\_script\_path](#output\_deploy\_script\_path) | Path to a rendered shell script containing every post-terraform step in order (autoscaler, AWS LBC, optional S3 CSI addon, Envoy Gateway + manifests, PVC, Anyscale Operator, verify). Open it to copy-paste steps after substituting the BYO placeholders (<eks\_cluster\_name>, <anyscale\_cloud\_name>, <node\_IAM\_role\_arn>). |
 | <a name="output_helm_upgrade_command"></a> [helm\_upgrade\_command](#output\_helm\_upgrade\_command) | The helm upgrade command. |
 | <a name="output_memorydb_endpoint"></a> [memorydb\_endpoint](#output\_memorydb\_endpoint) | MemoryDB cluster configuration endpoint as host:port. Only set when `enable_memorydb = true`. |
 | <a name="output_s3_pvc_bucket_name"></a> [s3\_pvc\_bucket\_name](#output\_s3\_pvc\_bucket\_name) | Name of the S3 bucket exposed as a PVC via the Mountpoint-for-S3 CSI driver. Only set when `enable_s3_pvc = true`. |

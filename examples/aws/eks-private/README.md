@@ -40,12 +40,15 @@ terraform plan
 terraform apply
 ```
 
-`terraform apply` writes two files into `./generated/` for use in later steps:
+`terraform apply` writes three files into `./generated/` for use in later steps:
 
 * `generated/cloud-resource.yaml` — passed to `anyscale cloud register -f …` below.
 * `generated/pv-pvc.yaml` — applied via `kubectl` when `enable_s3_pvc = true` (the default).
+* `generated/deploy.sh` — an executable shell script that runs every post-terraform step in order (cloud register → kubectl/helm installs → verify). Use it to drive the full flow end-to-end, or copy-paste sections of it.
 
 Note the Terraform output, which includes the cloud registration and helm upgrade commands used below.
+
+> **Tip — drive the post-terraform steps from `generated/deploy.sh`.** The script wraps every step in this README (Register → Authenticate → Install autoscaler/LBC/Envoy Gateway → Apply PVC → Install Operator → Verify) in order. Either run it end-to-end (`./generated/deploy.sh`) or open it side-by-side with this README and copy-paste step by step. The rest of this README documents what that script is doing so you can adapt or run pieces of it manually. (Note: because this example is private-by-default, you must run the script from inside the VPC — via VPN/bastion — unless `validation_test_mode = true` is set.)
 
 ### Register the Anyscale Cloud
 
@@ -299,7 +302,7 @@ This example ships with two variables, `validation_test_mode` and `validation_te
 | ---- | ----------- |
 | <a name="output_anyscale_registration_command"></a> [anyscale\_registration\_command](#output\_anyscale\_registration\_command) | The `anyscale cloud register` command with all required flags pre-populated. (The rendered `generated/cloud-resource.yaml` is also available as a reference but is not currently consumable by `anyscale cloud register -f` for K8S compute stacks.) |
 | <a name="output_aws_region"></a> [aws\_region](#output\_aws\_region) | The AWS region. This is used for Helm chart values. |
-| <a name="output_deploy_script_path"></a> [deploy\_script\_path](#output\_deploy\_script\_path) | Path to a rendered shell script containing every post-`terraform apply` step in order (autoscaler, AWS LBC, Envoy Gateway + manifests, PVC, Anyscale Operator, verify). Open it to copy-paste steps, or run end-to-end after exporting CLOUD\_DEPLOYMENT\_ID. |
+| <a name="output_deploy_script_path"></a> [deploy\_script\_path](#output\_deploy\_script\_path) | Path to a rendered shell script containing every post-terraform step in order (autoscaler, AWS LBC, Envoy Gateway + manifests, PVC, Anyscale Operator, verify). Open it to copy-paste steps, or run end-to-end after exporting CLOUD\_DEPLOYMENT\_ID. |
 | <a name="output_eks_cluster_name"></a> [eks\_cluster\_name](#output\_eks\_cluster\_name) | The name of the EKS cluster. This is used for Helm chart values. |
 | <a name="output_helm_upgrade_command"></a> [helm\_upgrade\_command](#output\_helm\_upgrade\_command) | The Anyscale Operator helm upgrade command, with gateway settings populated for the Anyscale Envoy Gateway setup. |
 | <a name="output_memorydb_endpoint"></a> [memorydb\_endpoint](#output\_memorydb\_endpoint) | MemoryDB cluster configuration endpoint as host:port — what the rendered cloud-resource.yaml uses for `kubernetes_config.redis_endpoint`. Only set when `enable_memorydb = true`. |

@@ -160,7 +160,7 @@ output "helm_upgrade_command" {
 }
 
 #####################################################################
-# Rendered post-apply deployment script — ordered list of every
+# Rendered post-terraform deployment script — ordered list of every
 # helm/kubectl/anyscale command to run after `terraform apply`.
 # Open generated/deploy.sh and run the steps in order, or pipe to
 # bash if you trust the substitutions.
@@ -169,7 +169,7 @@ output "helm_upgrade_command" {
 locals {
   deploy_script = <<-EOT
     #!/usr/bin/env bash
-    # Anyscale on EKS (private networking) — post-apply deployment commands.
+    # Anyscale on EKS (private networking) — post-terraform deployment commands.
     #
     # Rendered by Terraform for cluster '${var.eks_cluster_name}' in ${var.aws_region}.
     # Run these steps in order. Steps 5-8 depend on $CLOUD_DEPLOYMENT_ID
@@ -306,7 +306,7 @@ resource "local_file" "deploy_script" {
 }
 
 output "deploy_script_path" {
-  description = "Path to a rendered shell script containing every post-`terraform apply` step in order (autoscaler, AWS LBC, Envoy Gateway + manifests, PVC, Anyscale Operator, verify). Open it to copy-paste steps, or run end-to-end after exporting CLOUD_DEPLOYMENT_ID."
+  description = "Path to a rendered shell script containing every post-terraform step in order (autoscaler, AWS LBC, Envoy Gateway + manifests, PVC, Anyscale Operator, verify). Open it to copy-paste steps, or run end-to-end after exporting CLOUD_DEPLOYMENT_ID."
   value       = local_file.deploy_script.filename
 }
 
