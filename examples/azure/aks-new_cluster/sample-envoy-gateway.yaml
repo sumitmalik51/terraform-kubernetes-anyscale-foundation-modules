@@ -4,8 +4,16 @@
 # AFTER `anyscale cloud register` (so you have the cloud deployment ID
 # for the certificate Secret references in the Gateway listeners).
 #
-# Replace <cldrsrc-id> with the cloud deployment ID returned by
-# `anyscale cloud register` (e.g. cldrsrc_abc123...).
+# IMPORTANT: replace <cldrsrc-id> with the DASH-form of the cloud
+# deployment ID returned by `anyscale cloud register`. Kubernetes Secret
+# names cannot contain underscores, so the operator stores the cert
+# Secret as `anyscale-cldrsrc-<dash-form>-certificate`. If the register
+# command returned `cldrsrc_abc123xyz`, substitute `cldrsrc-abc123xyz`.
+#
+# Example one-liner that handles the conversion automatically:
+#   CLOUD_ID=cldrsrc_abc123xyz   # value from `anyscale cloud register`
+#   sed "s/<cldrsrc-id>/$(echo $CLOUD_ID | tr _ -)/g" sample-envoy-gateway.yaml \
+#     | kubectl apply -f -
 ---
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: EnvoyProxy

@@ -122,10 +122,14 @@ Create the operator namespace if it doesn't already exist:
 kubectl create namespace anyscale-operator
 ```
 
-In `examples/azure/aks-new_cluster/sample-envoy-gateway.yaml`, replace every occurrence of `<cldrsrc-id>` with the cloud deployment ID from Step 6 (omit the `cldrsrc_` prefix only if the user's actual Secret names do; otherwise keep the full ID). Then apply:
+In `examples/azure/aks-new_cluster/sample-envoy-gateway.yaml`, replace every occurrence of `<cldrsrc-id>` with the **dash-form** of the cloud deployment ID from Step 6. Kubernetes Secret names can't contain underscores, so the operator stores the cert Secret as `anyscale-cldrsrc-<dash-form>-certificate` — if the register command returned `cldrsrc_abc123xyz`, substitute `cldrsrc-abc123xyz`.
+
+One-liner that does the substitution + apply in one shot:
 
 ```shell
-kubectl apply -f sample-envoy-gateway.yaml
+CLOUD_ID=cldrsrc_xxx   # value from Step 6
+sed "s/<cldrsrc-id>/$(echo $CLOUD_ID | tr _ -)/g" sample-envoy-gateway.yaml \
+  | kubectl apply -f -
 ```
 
 Retrieve the gateway's load-balancer hostname (needed in the next step):

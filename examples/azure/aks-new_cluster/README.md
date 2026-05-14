@@ -85,10 +85,12 @@ A sample manifest, `sample-envoy-gateway.yaml`, has been provided in this repo. 
 
 The Gateway listeners reference TLS Secrets whose names embed the Anyscale cloud deployment ID (`<cldrsrc-id>`), so apply this manifest **after** running `anyscale cloud register` further down in this guide. The `anyscale-operator` namespace must also exist before applying the Gateway (the `--create-namespace` flag on the operator install handles that; you can also create it ahead of time with `kubectl create namespace anyscale-operator`).
 
-Once the cloud deployment ID is known, substitute `<cldrsrc-id>` in `sample-envoy-gateway.yaml` and apply:
+Once the cloud deployment ID is known, substitute `<cldrsrc-id>` with the **dash-form** of the ID (Kubernetes Secret names can't contain underscores, so the operator stores the cert as `anyscale-cldrsrc-<dash-form>-certificate`). The easiest way is to pipe through `sed` and `tr`:
 
 ```shell
-kubectl apply -f sample-envoy-gateway.yaml
+CLOUD_ID=cldrsrc_xxx  # value from `anyscale cloud register`
+sed "s/<cldrsrc-id>/$(echo $CLOUD_ID | tr _ -)/g" sample-envoy-gateway.yaml \
+  | kubectl apply -f -
 ```
 
 Retrieve the Gateway's load-balancer hostname for the operator install:
