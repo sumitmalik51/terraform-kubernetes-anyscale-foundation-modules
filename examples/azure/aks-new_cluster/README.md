@@ -18,7 +18,7 @@ claude
 # Then type: /deploy-azure-aks
 ```
 
-This will walk you through the full deployment process, check your prerequisites, and help you configure variables. You can also jump to a specific step (e.g., `/deploy-azure-aks nginx` or `/deploy-azure-aks register`).
+This will walk you through the full deployment process, check your prerequisites, and help you configure variables. You can also jump to a specific step (e.g., `/deploy-azure-aks envoy` or `/deploy-azure-aks register`).
 
 ### Prerequisites
 
@@ -57,7 +57,7 @@ Note the output from Terraform which includes example cloud registration, helm c
 ### Install the Kubernetes Requirements
 
 The Anyscale Operator requires the following components:
-* [Nginx Ingress Controller](https://kubernetes.github.io/ingress-nginx/deploy/) (other ingress controllers may be possible but are untested)
+* [Envoy Gateway](https://gateway.envoyproxy.io/) (other Gateway API implementations may be possible but are untested). Requires Kubernetes 1.30 or later.
 * (Optional) [Nvidia device plugin](https://github.com/NVIDIA/k8s-device-plugin/tree/main?tab=readme-ov-file#deployment-via-helm) (required if utilizing GPU nodes)
 
 **Note:** Ensure that you are authenticated to the AKS cluster for the remaining steps. You can use the command from the Terraform output:
@@ -67,20 +67,35 @@ The Anyscale Operator requires the following components:
 az aks get-credentials --resource-group <azure_resource_group_name> --name <aks_cluster_name> --overwrite-existing
 ```
 
-#### Install the Nginx ingress controller
+#### Install Envoy Gateway
 
-A sample file, `sample-values_nginx.yaml` has been provided in this repo. Please review for your requirements before using.
-
-Run:
+Install the Envoy Gateway Helm chart:
 
 ```shell
-helm repo add nginx https://kubernetes.github.io/ingress-nginx
-helm upgrade ingress-nginx nginx/ingress-nginx \
-  --version 4.12.1 \
-  --namespace ingress-nginx \
-  --values sample-values_nginx.yaml \
-  --create-namespace \
-  --install
+helm install eg oci://docker.io/envoyproxy/gateway-helm \
+  --version v1.7.0 \
+  --namespace envoy-gateway-system \
+  --create-namespace
+
+kubectl wait --for=condition=available deployment/envoy-gateway \
+  -n envoy-gateway-system --timeout=120s
+```
+
+A sample manifest, `sample-envoy-gateway.yaml`, has been provided in this repo. It contains three resources: an `EnvoyProxy` (with Azure load-balancer annotations), a `GatewayClass` named `eg`, and a `Gateway` named `gateway` in the `anyscale-operator` namespace with HTTP/HTTPS listeners.
+
+The Gateway listeners reference TLS Secrets whose names embed the Anyscale cloud deployment ID (`<cldrsrc-id>`), so apply this manifest **after** running `anyscale cloud register` further down in this guide. The `anyscale-operator` namespace must also exist before applying the Gateway (the `--create-namespace` flag on the operator install handles that; you can also create it ahead of time with `kubectl create namespace anyscale-operator`).
+
+Once the cloud deployment ID is known, substitute `<cldrsrc-id>` in `sample-envoy-gateway.yaml` and apply:
+
+```shell
+kubectl apply -f sample-envoy-gateway.yaml
+```
+
+Retrieve the Gateway's load-balancer hostname for the operator install:
+
+```shell
+kubectl get gateway gateway -n anyscale-operator \
+  -o jsonpath='{.status.addresses[0].value}'
 ```
 
 #### (Optional) Install the Nvidia device plugin
@@ -161,11 +176,18 @@ helm upgrade anyscale-operator anyscale/anyscale-operator \
   --set-string global.auth.iamIdentity=... \
   --set-string global.auth.audience=api://.../.default \
   --set-string workloads.serviceAccount.name=anyscale-operator \
+  --set networking.gateway.enabled=true \
+  --set-string networking.gateway.name=gateway \
+  --set-string networking.gateway.namespace=anyscale-operator \
+  --set-string networking.gateway.apiVersion=gateway.networking.k8s.io/v1 \
+  --set-string networking.gateway.hostname=<gateway-lb-address> \
   --namespace anyscale-operator \
   --create-namespace \
   --wait \
   -i
 ```
+
+Replace `<gateway-lb-address>` with the value returned by the `kubectl get gateway` command above.
 
 [optional] If you are using GPU types other than T4 follow these steps:
 A sample file, `sample-custom_values.yaml` has been provided in this repo. Make a copy `custom_values.yaml` and update based on your GPU types before using.

@@ -9,7 +9,7 @@ allowed-tools: Read, Bash, Grep, Glob
 
 Walk the user through deploying the Azure AKS example at `examples/azure/aks-new_cluster/`.
 
-If `$ARGUMENTS` specifies a step (e.g., "terraform", "nginx", "gpu", "register", "operator"), skip to that step. Otherwise, guide from the beginning.
+If `$ARGUMENTS` specifies a step (e.g., "terraform", "envoy", "gpu", "register", "operator"), skip to that step. Otherwise, guide from the beginning.
 
 ## Prerequisites
 
@@ -64,19 +64,23 @@ Use the terraform output command:
 az aks get-credentials --resource-group <rg-name> --name <cluster-name> --overwrite-existing
 ```
 
-## Step 4: Install Nginx Ingress Controller
+## Step 4: Install Envoy Gateway
+
+The Anyscale Operator on AKS uses Envoy Gateway (Gateway API) instead of an ingress controller. Requires Kubernetes 1.30+.
+
+Install the Envoy Gateway Helm chart:
 
 ```shell
-helm repo add nginx https://kubernetes.github.io/ingress-nginx
-helm upgrade ingress-nginx nginx/ingress-nginx \
-  --version 4.12.1 \
-  --namespace ingress-nginx \
-  --values sample-values_nginx.yaml \
-  --create-namespace \
-  --install
+helm install eg oci://docker.io/envoyproxy/gateway-helm \
+  --version v1.7.0 \
+  --namespace envoy-gateway-system \
+  --create-namespace
+
+kubectl wait --for=condition=available deployment/envoy-gateway \
+  -n envoy-gateway-system --timeout=120s
 ```
 
-The sample values file is at `examples/azure/aks-new_cluster/sample-values_nginx.yaml`.
+The Gateway/EnvoyProxy/GatewayClass manifests are in `examples/azure/aks-new_cluster/sample-envoy-gateway.yaml`. They reference a TLS Secret name that embeds the Anyscale cloud deployment ID, so apply them after Step 6 (cloud register).
 
 ## Step 5 (Optional): Install Nvidia Device Plugin
 
@@ -108,14 +112,37 @@ anyscale cloud register \
   --cloud-storage-bucket-endpoint 'https://<storage-account>.blob.core.windows.net'
 ```
 
-## Step 7: Install the Anyscale Operator
+Note the returned cloud deployment ID (e.g. `cldrsrc_...`) — needed in the next two steps.
+
+## Step 7: Apply Envoy Gateway Resources
+
+Create the operator namespace if it doesn't already exist:
+
+```shell
+kubectl create namespace anyscale-operator
+```
+
+In `examples/azure/aks-new_cluster/sample-envoy-gateway.yaml`, replace every occurrence of `<cldrsrc-id>` with the cloud deployment ID from Step 6 (omit the `cldrsrc_` prefix only if the user's actual Secret names do; otherwise keep the full ID). Then apply:
+
+```shell
+kubectl apply -f sample-envoy-gateway.yaml
+```
+
+Retrieve the gateway's load-balancer hostname (needed in the next step):
+
+```shell
+kubectl get gateway gateway -n anyscale-operator \
+  -o jsonpath='{.status.addresses[0].value}'
+```
+
+## Step 8: Install the Anyscale Operator
 
 ```shell
 helm repo add anyscale https://anyscale.github.io/helm-charts
 helm repo update
 ```
 
-Then use the helm command from terraform output, replacing `<cloud-deployment-id>` with the ID from the cloud register step:
+Then use the helm command from terraform output, replacing `<cloud-deployment-id>` with the ID from Step 6 and `<gateway-lb-address>` with the value from Step 7:
 
 ```shell
 helm upgrade anyscale-operator anyscale/anyscale-operator \
@@ -125,6 +152,11 @@ helm upgrade anyscale-operator anyscale/anyscale-operator \
   --set-string global.auth.iamIdentity=<client-id> \
   --set-string global.auth.audience=api://086bc555-6989-4362-ba30-fded273e432b/.default \
   --set-string workloads.serviceAccount.name=anyscale-operator \
+  --set networking.gateway.enabled=true \
+  --set-string networking.gateway.name=gateway \
+  --set-string networking.gateway.namespace=anyscale-operator \
+  --set-string networking.gateway.apiVersion=gateway.networking.k8s.io/v1 \
+  --set-string networking.gateway.hostname=<gateway-lb-address> \
   --namespace anyscale-operator \
   --create-namespace \
   -i
@@ -137,10 +169,11 @@ For custom GPU types (other than T4), copy `sample-custom_values.yaml` to `custo
 To destroy all resources:
 
 ```shell
-# Remove helm releases first
+# Remove helm releases and Gateway resources first
 helm uninstall anyscale-operator -n anyscale-operator
 helm uninstall nvdp -n nvidia-device-plugin
-helm uninstall ingress-nginx -n ingress-nginx
+kubectl delete -f sample-envoy-gateway.yaml --ignore-not-found
+helm uninstall eg -n envoy-gateway-system
 
 # Then destroy terraform resources
 terraform destroy

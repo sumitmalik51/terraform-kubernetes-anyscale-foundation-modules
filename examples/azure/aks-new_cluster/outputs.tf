@@ -64,6 +64,11 @@ locals {
     "--set-string global.auth.iamIdentity=${azurerm_user_assigned_identity.anyscale_operator[0].client_id}",
     "--set-string global.auth.audience=api://086bc555-6989-4362-ba30-fded273e432b/.default",
     "--set-string workloads.serviceAccount.name=anyscale-operator",
+    "--set networking.gateway.enabled=true",
+    "--set-string networking.gateway.name=gateway",
+    "--set-string networking.gateway.namespace=${var.anyscale_operator_namespace}",
+    "--set-string networking.gateway.apiVersion=gateway.networking.k8s.io/v1",
+    "--set-string networking.gateway.hostname=<gateway-lb-address>",
     "--namespace ${var.anyscale_operator_namespace}",
     "--create-namespace",
     "-i"
