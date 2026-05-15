@@ -1,8 +1,5 @@
-[![Terraform Version][badge-terraform]](https://github.com/hashicorp/terraform/releases)
-[![AWS Provider Version][badge-tf-aws]](https://github.com/terraform-providers/terraform-provider-aws/releases)
-
-# Anyscale Azure AKS Example - Public Networking
-This example creates the resources to run Anyscale on Azure AKS with either public or private networking.
+# Anyscale Azure AKS Example
+This example creates the resources to run Anyscale on Azure AKS with public networking.
 
 The content of this module should be used as a starting point and modified to your own security and infrastructure
 requirements.
@@ -18,7 +15,7 @@ claude
 # Then type: /deploy-azure-aks
 ```
 
-This will walk you through the full deployment process, check your prerequisites, and help you configure variables. You can also jump to a specific step (e.g., `/deploy-azure-aks envoy` or `/deploy-azure-aks register`).
+This will walk you through the full deployment process, check your prerequisites, and help you configure variables. You can also jump to a specific step (e.g., `/deploy-azure-aks envoy`, `/deploy-azure-aks register`, or `/deploy-azure-aks pvc`).
 
 ### Prerequisites
 
@@ -142,7 +139,7 @@ helm upgrade nvdp nvdp/nvidia-device-plugin \
 
 Ensure that you are logged into Anyscale with valid CLI credentials. (`anyscale login`)
 
-Using the output from the Terraform modules, register the Anyscale Cloud. Choose a name for your cloud in Anyscale in `<anyscale_cloud_name`. It should look sonething like:
+Using the output from the Terraform modules, register the Anyscale Cloud. Choose a name for your cloud in Anyscale in `<anyscale_cloud_name>`. It should look something like:
 
 ```shell
 anyscale cloud register \
@@ -152,8 +149,8 @@ anyscale cloud register \
   --compute-stack k8s \
   --azure-tenant-id ... \
   --anyscale-operator-iam-identity ...  \
-  --cloud-storage-bucket-name 'azure://...' \
-  --cloud-storage-bucket-endpoint 'https://....blob.core.windows.net'
+  --cloud-storage-bucket-name 'abfss://<container>@<storage-account>.dfs.core.windows.net' \
+  --cloud-storage-bucket-endpoint 'https://<storage-account>.blob.core.windows.net'
 ```
 
 Note the **cloud deployment ID** (`cldrsrc_...`) printed at the end — you'll need it for the next two steps.
@@ -190,7 +187,7 @@ helm repo add anyscale https://anyscale.github.io/helm-charts
 helm repo update
 ```
 
-Using the output from the `cloud register`, install the Anyscale Operator on the AKS Cluster. It should look someting like:
+Using the output from the `cloud register`, install the Anyscale Operator on the AKS Cluster. It should look something like:
 
 ```shell
 helm upgrade anyscale-operator anyscale/anyscale-operator \
@@ -212,8 +209,7 @@ helm upgrade anyscale-operator anyscale/anyscale-operator \
 
 Replace `<gateway-lb-address>` with the value returned by the `kubectl get gateway` command above.
 
-[optional] If you are using GPU types other than T4 follow these steps:
-A sample file, `sample-custom_values.yaml` has been provided in this repo. Make a copy `custom_values.yaml` and update based on your GPU types before using.
+**(Optional)** If you are using GPU types other than T4, follow these steps. A sample file, `sample-custom_values.yaml` has been provided in this repo. Make a copy as `custom_values.yaml` and update based on your GPU types before using.
 
 ```shell
 helm upgrade anyscale-operator anyscale/anyscale-operator \
@@ -222,6 +218,141 @@ helm upgrade anyscale-operator anyscale/anyscale-operator \
   --create-namespace \
   -i
 ```
+
+### (Optional) Enable Azure Blob CSI PVC for Workloads
+
+Anyscale workloads can mount Azure Blob storage as shared persistent volumes via the Azure Blob CSI driver — useful for shared model artifacts, datasets, and checkpoints accessible from any Ray node. See the [Anyscale Azure PVC docs](https://docs.anyscale.com/clouds/azure/pvc) for the full background.
+
+This module supports it out of the box behind the `enable_blob_driver` variable. When enabled, terraform:
+
+1. Toggles `storage_profile.blob_driver_enabled = true` on the AKS cluster.
+2. Grants four role assignments on the Anyscale storage account — the two CSI driver components authenticate as different identities and both need access:
+   - **AKS control-plane (SystemAssigned) identity** — used by `csi-blob-controller` for dynamic container provisioning. Gets `Storage Blob Data Contributor` + `Storage Account Key Operator Service Role`.
+   - **AKS kubelet (UserAssigned `<cluster>-agentpool`) identity** — used by `csi-blob-node` for pod-runtime mount. Gets the same two roles.
+
+   Granting only one of the two identities causes either a 3-minute provisioning loop with 403 errors (controller can't create the container) or AADSTS70025 mount failures at pod startup (kubelet can't authenticate via MSI). Both are required.
+
+To enable, set in your `terraform.tfvars`:
+
+```hcl
+enable_blob_driver = true
+```
+
+Then re-run `terraform apply` (safe to run against an existing cluster; only adds the role assignments).
+
+#### When to create the PVC
+
+You have two options:
+
+- **Default — create now**: apply the PVC right after operator install (steps below). The PVC is ready by the time you deploy your first workload.
+- **Create later**: skip this section for now. The terraform helper output stays available, so when you decide you want shared storage, come back and run the same commands. The cluster, CSI driver, and role assignments are already in place from `terraform apply` — only the K8s-side PVC apply + cloud-side registration are deferred.
+
+The steps below apply to the "create now" path. If you're going with "create later", just bookmark this section and come back.
+
+#### Apply the StorageClass + PVC
+
+A sample manifest, `sample-blob-pvc.yaml`, is provided. It contains a `StorageClass` (`blobfuse-csi`) backed by the storage account terraform already provisioned, and a `PersistentVolumeClaim` (`anyscale-shared-fuse`, ReadWriteMany, 100 GiB) in the `anyscale-operator` namespace.
+
+The easiest way to apply it is via the `pvc_apply_command` terraform output, which substitutes the storage-account and resource-group placeholders for you:
+
+```shell
+$(terraform output -raw pvc_apply_command)
+```
+
+Or substitute manually:
+
+```shell
+SA=$(terraform output -raw azure_storage_account_name)
+RG=$(terraform output -raw azure_resource_group_name)
+sed -e "s/<storage-account>/$SA/g" -e "s/<resource-group>/$RG/g" sample-blob-pvc.yaml \
+  | kubectl apply -f -
+```
+
+Verify the PVC reaches `Bound`:
+
+```shell
+kubectl get pvc anyscale-shared-fuse -n anyscale-operator
+```
+
+#### Register the PVC with the Anyscale cloud
+
+Anyscale needs the PVC referenced on the cloud's resource spec for workloads to mount it. The Anyscale CLI offers two paths; pick whichever fits your flow:
+
+**Option A — set it at register time** (cleanest, but requires creating the namespace + applying the PVC *before* `anyscale cloud register`):
+
+```shell
+anyscale cloud register \
+  ... \
+  --persistent-volume-claim anyscale-shared-fuse
+```
+
+Note: `--persistent-volume-claim` is mutually exclusive with `--nfs-mount-target` / `--nfs-mount-path` and `--csi-ephemeral-volume-driver`. Don't combine with `enable_nfs = true` on the same cloud.
+
+**Option B — update an existing cloud via resources YAML**:
+
+There's no direct flag for this on `anyscale cloud update`; you patch the cloud's full resource spec via `-f`. The resources file is a full replacement (not a partial patch) and must include every field currently on the resource. Run `anyscale cloud get --name <cloud-name>` to see the current spec, then save it as `resources.yaml` with `file_storage` added:
+
+```yaml
+- cloud_resource_id: cldrsrc_xxx                # from `anyscale cloud get`
+  name: k8s-azure-<region>
+  provider: AZURE
+  compute_stack: K8S
+  region: <region>
+  object_storage:
+    bucket_name: abfss://<container>@<storage-account>.dfs.core.windows.net
+    endpoint: https://<storage-account>.blob.core.windows.net
+  azure_config:
+    tenant_id: <azure-tenant-id>
+  kubernetes_config:
+    anyscale_operator_iam_identity: <operator-principal-id>
+  file_storage:                                 # the new bit
+    persistent_volume_claim: anyscale-shared-fuse
+```
+
+Then apply (pass `-y` to skip the diff prompt):
+
+```shell
+anyscale cloud update --name <anyscale-cloud-name> -f resources.yaml -y
+```
+
+See the [CloudResource schema](https://docs.anyscale.com/reference/cloud#cloudresource) for the full structure of the resources file.
+
+#### Smoke test
+
+Mount the PVC in a throwaway pod to confirm read/write works end-to-end. Apply this manifest, wait for it to complete, then read the logs:
+
+```shell
+cat <<'EOF' | kubectl apply -f -
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pvc-test
+  namespace: anyscale-operator
+spec:
+  restartPolicy: Never
+  containers:
+  - name: pvc-test
+    image: busybox
+    command: ["sh","-c","echo hello > /mnt/test && cat /mnt/test"]
+    volumeMounts:
+    - name: data
+      mountPath: /mnt
+  volumes:
+  - name: data
+    persistentVolumeClaim:
+      claimName: anyscale-shared-fuse
+EOF
+
+# Wait up to ~3 min for image pull + PVC mount; pod prints `hello` and exits.
+kubectl wait --for=jsonpath='{.status.phase}'=Succeeded pod/pvc-test \
+  -n anyscale-operator --timeout=180s
+kubectl logs pvc-test -n anyscale-operator
+kubectl delete pod pvc-test -n anyscale-operator
+```
+
+Should print `hello`. Files written here persist in the Azure blob container; subsequent Anyscale workloads can read them through the same PVC mount in their compute config.
+
+(`kubectl run --rm -it ...` works in principle but has a default 60s timeout that often expires before the CSI driver finishes the first mount on a fresh cluster. The manifest-based form above tolerates the longer first-mount path.)
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements

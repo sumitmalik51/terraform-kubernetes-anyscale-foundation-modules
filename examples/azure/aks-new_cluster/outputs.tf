@@ -79,3 +79,17 @@ output "helm_upgrade_command" {
   description = "The helm upgrade command for installing the Anyscale operator."
   value       = length(local.helm_upgrade_command_parts) > 0 ? join(" \\\n\t", local.helm_upgrade_command_parts) : null
 }
+
+output "pvc_apply_command" {
+  description = <<-EOT
+    Ready-to-run command to apply the sample Azure Blob CSI PVC manifest with
+    placeholders substituted. Only emitted when enable_blob_driver = true.
+    Requires the `anyscale-operator` namespace to already exist (the operator
+    helm install creates it with --create-namespace).
+  EOT
+  value = !(var.enable_blob_driver && var.enable_operator_infrastructure) ? null : format(
+    "sed -e 's/<storage-account>/%s/g' -e 's/<resource-group>/%s/g' sample-blob-pvc.yaml | kubectl apply -f -",
+    azurerm_storage_account.sa[0].name,
+    azurerm_resource_group.rg.name,
+  )
+}
