@@ -93,3 +93,39 @@ output "pvc_apply_command" {
     azurerm_resource_group.rg.name,
   )
 }
+
+locals {
+  # bitnami/redis exposes the primary at: <release>-master.<namespace>.svc.cluster.local:6379
+  hnft_redis_endpoint = var.enable_hnft ? "redis-master.${var.hnft_redis_namespace}.svc.cluster.local:6379" : null
+
+  hnft_redis_helm_parts = var.enable_hnft ? compact([
+    "helm install redis oci://registry-1.docker.io/bitnamicharts/redis",
+    "--namespace ${var.hnft_redis_namespace}",
+    "--create-namespace",
+    "--wait",
+    "--timeout 5m",
+    "--set auth.enabled=false",
+    "--set architecture=replication",
+    "--set replica.replicaCount=1",
+    var.hnft_redis_chart_version != null ? "--version ${var.hnft_redis_chart_version}" : "",
+  ]) : []
+}
+
+output "redis_helm_install_command" {
+  description = "Ready-to-run helm command that deploys an in-cluster Redis for HNFT. Only emitted when enable_hnft = true."
+  value       = length(local.hnft_redis_helm_parts) > 0 ? join(" \\\n\t", local.hnft_redis_helm_parts) : null
+}
+
+output "hnft_service_config_snippet" {
+  description = <<-EOT
+    Service-config YAML block that enables Head Node Fault Tolerance for an
+    individual Anyscale service. Paste under the top-level keys of each
+    service config that should use HNFT. Only emitted when enable_hnft = true.
+    See: https://docs.anyscale.com/administration/resource-management/head-node-fault-tolerance
+  EOT
+  value       = !var.enable_hnft ? null : <<-EOT
+    ray_gcs_external_storage_config:
+      enabled: true
+      address: ${local.hnft_redis_endpoint}
+  EOT
+}

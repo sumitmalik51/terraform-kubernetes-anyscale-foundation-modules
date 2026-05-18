@@ -171,11 +171,15 @@ sed "s/<cldrsrc-id>/$(echo $CLOUD_ID | tr _ -)/g" sample-envoy-gateway.yaml \
   | kubectl apply -f -
 ```
 
-Retrieve the Gateway's load-balancer address for the operator install:
+Wait for the Gateway's load-balancer to be provisioned (typically 10-30s), then capture its address for the operator install:
 
 ```shell
-kubectl get gateway gateway -n anyscale-operator \
-  -o jsonpath='{.status.addresses[0].value}'
+kubectl wait --for=condition=Programmed gateway/gateway \
+  -n anyscale-operator --timeout=180s
+
+GATEWAY_ADDRESS=$(kubectl get gateway gateway -n anyscale-operator \
+  -o jsonpath='{.status.addresses[0].value}')
+echo "Gateway address: $GATEWAY_ADDRESS"
 ```
 
 ### Install the Anyscale Operator
@@ -218,6 +222,51 @@ helm upgrade anyscale-operator anyscale/anyscale-operator \
   --create-namespace \
   -i
 ```
+
+### (Optional) Enable Head Node Fault Tolerance (HNFT)
+
+HNFT externalizes Ray GCS state to a Redis-compatible store so the Ray head node can restart without losing cluster state. See the [Anyscale HNFT docs](https://docs.anyscale.com/administration/resource-management/head-node-fault-tolerance) for background.
+
+On Kubernetes, Anyscale does **not** auto-provision Redis. You provide one, then opt individual services into HNFT via their service config. This example supports an opt-in in-cluster Redis (bitnami/redis) for the backend.
+
+To enable, set in your `terraform.tfvars`:
+
+```hcl
+enable_hnft = true
+
+# Optional overrides — defaults shown:
+# hnft_redis_namespace     = "ray-system"   # K8s namespace for the in-cluster Redis
+# hnft_redis_chart_version = null           # pin a bitnami/redis chart version
+```
+
+Re-run `terraform apply` (safe against an existing cluster — no Azure resources are added). Two new outputs become available: `redis_helm_install_command` and `hnft_service_config_snippet`.
+
+#### Deploy the in-cluster Redis
+
+```shell
+$(terraform output -raw redis_helm_install_command)
+```
+
+The helm command uses `--wait`, so it returns only after the Redis pods are Ready. The chart deploys a single primary + 1 replica (matching the HNFT doc's "single shard + ≥1 replica" requirement), auth disabled. The primary is reachable in-cluster at `redis-master.ray-system.svc.cluster.local:6379`.
+
+#### Enable HNFT per service
+
+HNFT is enabled per workload, not cloud-wide. For each Anyscale service that should be HNFT-protected, paste this block into its service config:
+
+```shell
+terraform output -raw hnft_service_config_snippet
+# ray_gcs_external_storage_config:
+#   enabled: true
+#   address: redis-master.ray-system.svc.cluster.local:6379
+```
+
+Services that don't include this block are unaffected — they run without HNFT as before.
+
+#### Caveats
+
+- The in-cluster Redis here shares failure domain with the AKS cluster — it protects against head-pod restarts, not full cluster loss. For production, run Azure Cache for Redis in the same VNet and replace the `address` value in your service configs with that endpoint.
+- Auth is disabled because Anyscale's documented `address` schema (`host:port` or `rediss://host:port`) has no credential field. Network reachability within the cluster is the isolation boundary.
+- No TLS in-cluster. Use Azure Cache for Redis with TLS + the `rediss://` scheme for an encrypted path; set `certificate_path` per service if the cert is private.
 
 ### (Optional) Enable Azure Blob CSI PVC for Workloads
 

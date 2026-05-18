@@ -221,3 +221,29 @@ variable "storage_use_azuread" {
   nullable    = false
   default     = false
 }
+
+variable "enable_hnft" {
+  description = <<-EOT
+    (Optional) If true, emit outputs for deploying an in-cluster Redis (bitnami/redis)
+    and a kubernetes_config YAML snippet that enables Head Node Fault Tolerance for
+    the registered Anyscale cloud.
+    See: https://docs.anyscale.com/administration/resource-management/head-node-fault-tolerance
+  EOT
+  type        = bool
+  nullable    = false
+  default     = false
+}
+
+variable "hnft_redis_namespace" {
+  description = "(Optional) Kubernetes namespace for the in-cluster Redis used for HNFT. Created by the helm install command."
+  type        = string
+  nullable    = false
+  default     = "ray-system"
+}
+
+variable "hnft_redis_chart_version" {
+  description = "(Optional) bitnami/redis chart version pin. Leave null to use the chart's latest."
+  type        = string
+  nullable    = true
+  default     = null
+}

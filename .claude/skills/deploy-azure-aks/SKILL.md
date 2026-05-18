@@ -35,6 +35,9 @@ Key optional variables:
 - `gpu_pool_configs` - Map of GPU pool configs. Keys like "T4", "A100". Each needs `name` (max 8 lowercase alphanum chars), `vm_size`, `product_name`, `gpu_count`. Set to `{}` for CPU-only.
 - `enable_nfs` - Enable NFS storage (default: false)
 - `enable_blob_driver` - Enable Azure Blob CSI driver (default: false)
+- `enable_hnft` - Emit outputs for in-cluster Redis + per-service HNFT snippet (default: false). See Step 9.
+- `hnft_redis_namespace` - K8s namespace for the HNFT Redis (default: "ray-system")
+- `hnft_redis_chart_version` - Pin bitnami/redis chart version (default: null = latest)
 - `system_vm_size` - System node VM size (default: "Standard_D2s_v5")
 - `cpu_vm_size` - CPU node VM size (default: "Standard_D16s_v5")
 
@@ -132,11 +135,15 @@ sed "s/<cldrsrc-id>/$(echo $CLOUD_ID | tr _ -)/g" sample-envoy-gateway.yaml \
   | kubectl apply -f -
 ```
 
-Retrieve the gateway's load-balancer hostname (needed in the next step):
+Wait for the gateway LB to be provisioned (typically 10-30s), then capture its address (needed in the next step):
 
 ```shell
-kubectl get gateway gateway -n anyscale-operator \
-  -o jsonpath='{.status.addresses[0].value}'
+kubectl wait --for=condition=Programmed gateway/gateway \
+  -n anyscale-operator --timeout=180s
+
+GATEWAY_ADDRESS=$(kubectl get gateway gateway -n anyscale-operator \
+  -o jsonpath='{.status.addresses[0].value}')
+echo "Gateway address: $GATEWAY_ADDRESS"
 ```
 
 ## Step 8: Install the Anyscale Operator
@@ -168,7 +175,57 @@ helm upgrade anyscale-operator anyscale/anyscale-operator \
 
 For custom GPU types (other than T4), copy `sample-custom_values.yaml` to `custom_values.yaml`, edit it, and add `-f custom_values.yaml` to the helm command.
 
-## Step 9 (Optional): Enable Azure Blob CSI PVC for workloads
+## Step 9 (Optional): Enable Head Node Fault Tolerance (HNFT)
+
+Only run this if you want Ray's GCS state to survive head-node restarts. HNFT externalizes GCS metadata to a Redis-compatible store so a restarted head pod resumes the same session rather than starting fresh. See https://docs.anyscale.com/administration/resource-management/head-node-fault-tolerance.
+
+On Kubernetes, Anyscale does **not** auto-provision Redis — the cluster operator provides one. This example supports an opt-in in-cluster Redis (bitnami/redis) for the backend. HNFT is enabled **per workload** (not cloud-wide), so each service that should be HNFT-protected opts in via its service config.
+
+1. Set in `terraform.tfvars`:
+
+   ```hcl
+   enable_hnft = true
+   # Optional:
+   # hnft_redis_namespace     = "ray-system"
+   # hnft_redis_chart_version = null
+   ```
+
+   Re-run `terraform apply` (no Azure resources added; only new outputs).
+
+2. Deploy the in-cluster Redis. The helm command uses `--wait`, so it returns only after pods are Ready:
+
+   ```shell
+   $(terraform output -raw redis_helm_install_command)
+   ```
+
+   The chart deploys 1 primary + 1 replica (single shard, matching the HNFT doc's requirement), auth disabled. Primary is reachable at `redis-master.ray-system.svc.cluster.local:6379`.
+
+3. For each Anyscale service that should be HNFT-protected, paste the snippet into its service config at the **top level** (alongside `applications:`):
+
+   ```shell
+   terraform output -raw hnft_service_config_snippet
+   # ray_gcs_external_storage_config:
+   #   enabled: true
+   #   address: redis-master.ray-system.svc.cluster.local:6379
+   ```
+
+   Services without this block run without HNFT as before — opt-in is per workload.
+
+4. Verify HNFT is wired. After a service is running, inspect Redis for Ray GCS keys (session-prefixed):
+
+   ```shell
+   kubectl -n ray-system exec redis-master-0 -- redis-cli --scan | head
+   # Expect keys like: RAYses_<session-id>@{ACTOR,JOB,NODE,KV,WORKERS,...}
+   ```
+
+   To validate fault tolerance end-to-end: capture the current session ID from Redis, `kubectl delete pod <head-pod-name>`, wait for the new head pod to reach Running, and confirm the same session ID is still in Redis. Same session = HNFT working.
+
+**Caveats:**
+- The in-cluster Redis shares failure domain with the AKS cluster it protects. For production, use Azure Cache for Redis in the same VNet and replace the `address` in the service config with that endpoint.
+- Auth is disabled because Anyscale's documented `address` schema (`host:port` or `rediss://host:port`) has no credential field; isolation is network-level.
+- No TLS in-cluster. Use Azure Cache for Redis with `rediss://` for an encrypted path.
+
+## Step 10 (Optional): Enable Azure Blob CSI PVC for workloads
 
 Only run this if you want Anyscale workloads to mount Azure Blob storage as a shared `PersistentVolumeClaim` (useful for shared model artifacts, datasets, checkpoints). See https://docs.anyscale.com/clouds/azure/pvc.
 
@@ -250,6 +307,10 @@ kubectl delete storageclass blobfuse-csi --ignore-not-found
 kubectl delete gateway gateway -n anyscale-operator --ignore-not-found
 kubectl delete -f sample-envoy-gateway.yaml --ignore-not-found
 helm uninstall eg -n envoy-gateway-system
+
+# (Optional) If HNFT was enabled, also remove the in-cluster Redis.
+helm uninstall redis -n ray-system --ignore-not-found
+kubectl delete namespace ray-system --ignore-not-found
 
 # (Optional) NVIDIA device plugin, only if it was installed.
 helm uninstall nvdp -n nvidia-device-plugin
