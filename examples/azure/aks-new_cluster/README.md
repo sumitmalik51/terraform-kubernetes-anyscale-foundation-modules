@@ -317,43 +317,6 @@ anyscale cloud update --name <anyscale-cloud-name> -f resources.yaml -y
 
 See the [CloudResource schema](https://docs.anyscale.com/reference/cloud#cloudresource) for the full structure of the resources file.
 
-#### Smoke test
-
-Mount the PVC in a throwaway pod to confirm read/write works end-to-end. Apply this manifest, wait for it to complete, then read the logs:
-
-```shell
-cat <<'EOF' | kubectl apply -f -
-apiVersion: v1
-kind: Pod
-metadata:
-  name: pvc-test
-  namespace: anyscale-operator
-spec:
-  restartPolicy: Never
-  containers:
-  - name: pvc-test
-    image: busybox
-    command: ["sh","-c","echo hello > /mnt/test && cat /mnt/test"]
-    volumeMounts:
-    - name: data
-      mountPath: /mnt
-  volumes:
-  - name: data
-    persistentVolumeClaim:
-      claimName: anyscale-shared-fuse
-EOF
-
-# Wait up to ~3 min for image pull + PVC mount; pod prints `hello` and exits.
-kubectl wait --for=jsonpath='{.status.phase}'=Succeeded pod/pvc-test \
-  -n anyscale-operator --timeout=180s
-kubectl logs pvc-test -n anyscale-operator
-kubectl delete pod pvc-test -n anyscale-operator
-```
-
-Should print `hello`. Files written here persist in the Azure blob container; subsequent Anyscale workloads can read them through the same PVC mount in their compute config.
-
-(`kubectl run --rm -it ...` works in principle but has a default 60s timeout that often expires before the CSI driver finishes the first mount on a fresh cluster. The manifest-based form above tolerates the longer first-mount path.)
-
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
 
