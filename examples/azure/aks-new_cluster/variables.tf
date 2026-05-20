@@ -1,17 +1,19 @@
 variable "azure_subscription_id" {
   description = "(Required) Azure subscription ID"
   type        = string
+default = "replacesubscription"
 }
 
 variable "azure_location" {
   description = "(Optional) Azure region for all resources."
   type        = string
-  default     = "West US"
+ default = "replaceregion"
 }
 
 variable "azure_tenant_id" {
   description = "Azure tenant ID. Can be found by running `az account show --query tenantId -o tsv`."
   type        = string
+default = "replacetenantid"
 }
 
 variable "tags" {
@@ -26,7 +28,7 @@ variable "tags" {
 variable "aks_cluster_name" {
   description = "(Optional) Name of the AKS cluster (and related resources)."
   type        = string
-  default     = "anyscale-demo"
+  default = "replaceaksname"
 }
 
 variable "anyscale_operator_namespace" {
@@ -148,8 +150,8 @@ variable "gpu_pool_configs" {
     }
     A100 = {
       name         = "gpua100"
-      vm_size      = "Standard_NC24ads_A100_v4"
-      product_name = "NVIDIA-A100"
+      vm_size      = "Standard_NC40ads_H100_v5"
+      product_name = "NVIDIA-H100"
       gpu_count    = "1"
     }
     # Example of adding new GPU pools:
