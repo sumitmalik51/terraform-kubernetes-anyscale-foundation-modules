@@ -140,6 +140,7 @@ variable "gpu_pool_configs" {
     vm_size      = string
     product_name = string
     gpu_count    = string
+    min_count    = optional(number, 1)
   }))
   default = {
     T4 = {
@@ -147,12 +148,14 @@ variable "gpu_pool_configs" {
       vm_size      = "Standard_NC16as_T4_v3"
       product_name = "NVIDIA-T4"
       gpu_count    = "1"
+      min_count    = 0
     }
-    A100 = {
-      name         = "gpua100"
+    H100 = {
+      name         = "gpuh100"
       vm_size      = "Standard_NC40ads_H100_v5"
       product_name = "NVIDIA-H100"
       gpu_count    = "1"
+      min_count    = 1
     }
     # Example of adding new GPU pools:
     # A10 = {

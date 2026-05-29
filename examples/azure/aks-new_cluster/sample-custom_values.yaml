@@ -1,10 +1,10 @@
 workloads:
   instanceTypes:
     additional:
-      1xA100:
+      1xH100:
         resources:
-          CPU: 12 # should be less than the total CPU of the node
+          CPU: 36
           GPU: 1
-          memory: 64Gi
+          memory: 288Gi
           accelerators:
-            - A100-80G
+            - H100

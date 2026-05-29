@@ -161,7 +161,7 @@ resource "azurerm_kubernetes_cluster_node_pool" "gpu_ondemand" {
 
   # ── autoscaling (shared across all pools) ───────────────────────────────────
   auto_scaling_enabled = true
-  min_count            = 0
+  min_count            = each.value.min_count
   max_count            = 10
 
   upgrade_settings { max_surge = "1" }
@@ -232,6 +232,18 @@ resource "azurerm_kubernetes_cluster_node_pool" "gpu_spot" {
   tags = var.tags
 }
 
+###############################################################################
+# ROLE ASSIGNMENT – AKS identity → Network Contributor on VNet/Subnet
+# Required for AKS to manage Load Balancers and join subnets.
+# Without this, ingress-nginx LB creation fails with
+# LinkedAuthorizationFailed on Microsoft.Network/virtualNetworks/subnets/join/action
+###############################################################################
+resource "azurerm_role_assignment" "aks_network_contributor" {
+  scope                = azurerm_subnet.nodes.id
+  role_definition_name = "Network Contributor"
+  principal_id         = azurerm_kubernetes_cluster.aks.identity[0].principal_id
+}
+
 ##############################################################################
 # MANAGED IDENTITY FOR ANYSCALE OPERATOR
 ###############################################################################
@@ -265,7 +277,20 @@ resource "azurerm_federated_identity_credential" "anyscale_operator_fic" {
   subject   = "system:serviceaccount:${var.anyscale_operator_namespace}:anyscale-operator"
   audience  = ["api://AzureADTokenExchange"] # fixed value for AAD tokens
 }
+###############################################################################
+# FEDERATED‑IDENTITY CREDENTIAL  (anyscale-workload SA --> same Identity)
+# Ray workload pods use this SA to authenticate to Azure (e.g. blob storage).
+###############################################################################
+resource "azurerm_federated_identity_credential" "anyscale_workload_fic" {
+  count               = var.enable_operator_infrastructure ? 1 : 0
+  name                = "anyscale-workload-fed"
+  resource_group_name = azurerm_resource_group.rg.name
 
+  parent_id = azurerm_user_assigned_identity.anyscale_operator[0].id
+  issuer    = azurerm_kubernetes_cluster.aks.oidc_issuer_url
+  subject   = "system:serviceaccount:${var.anyscale_operator_namespace}:anyscale-workload"
+  audience  = ["api://AzureADTokenExchange"]
+}
 ###############################################################################
 # ROLE ASSIGNMENTS (IDENTITY ←→ STORAGE ACCOUNT)
 ###############################################################################
