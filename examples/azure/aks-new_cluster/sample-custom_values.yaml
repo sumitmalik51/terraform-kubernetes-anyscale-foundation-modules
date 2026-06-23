@@ -7,4 +7,4 @@ workloads:
           GPU: 1
           memory: 288Gi
           accelerators:
-            - H100
+            - A10
