@@ -427,13 +427,13 @@ workloads:
   instanceTypes:
     additional:
 
-      36CPU-288GB-1xH100:
+      36CPU-220GB-1xA10:
         resources:
           CPU: 36
           GPU: 1
           memory: 288Gi
           accelerators:
-            - H100
+            - A10
 
 patches:
   - kind: Pod
