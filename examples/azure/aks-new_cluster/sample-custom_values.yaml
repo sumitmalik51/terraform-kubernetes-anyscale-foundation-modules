@@ -1,7 +1,7 @@
 workloads:
   instanceTypes:
     additional:
-      1xH100:
+      1xA10:
         resources:
           CPU: 36
           GPU: 1
