@@ -29,7 +29,7 @@ az login --service-principal --username $env:AppID --password $env:AppSecret --t
 
 
 
-$ANYSCALE_TOKEN = "aph0_CkcwRQIgPNagNnkT_Ul21uKHQE0-nw4G0b9bcEPCMMlNoQA-zdYCIQDB9rXZLOQkMWNpbCOdk6O4Dr3h_TyLFcUakR3EQYpnlRJjEiAzVYrBB-VLkSjaSexR9chzBETSScaoc0otnCZpJL9zcBgBIh51c3JfdmNkZG50amh6ZWp5N210MjdzaXB2NjI0aTc6DAiP64_RBhDQ7_qXA0IMCOPO8c8GENDv-pcD8gEA"
+$ANYSCALE_TOKEN = "aph0_CkcwRQIhAPzpIaOksPWsI3FodvTurTWzyJiG0vqhrY08EZ6SNAoVAiAtpBUsp-SNl2D9i1cDJCwnjtAphlTqdqi90VDXKuVy1hJjEiBYxbBY2YXzpxp8ZGKe7vL-m0Nx5sa0LlC_ErD_lHBUpxgBIh51c3JfdmNkZG50amh6ZWp5N210MjdzaXB2NjI0aTc6DAjun8XVBhCIp5_DAkIMCMLP6tEGEIinn8MC8gEA"
 $ANYSCALE_HOST  = "https://console.anyscale.com"
 
 # ============================================================
