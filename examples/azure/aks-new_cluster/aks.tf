@@ -292,6 +292,24 @@ resource "azurerm_federated_identity_credential" "anyscale_workload_fic" {
   audience  = ["api://AzureADTokenExchange"]
 }
 ###############################################################################
+# FEDERATED‑IDENTITY CREDENTIAL  (default SA --> same Identity)
+# The Anyscale operator schedules Ray cluster/workspace pods under the
+# namespace's *default* ServiceAccount (not anyscale-operator/anyscale-workload).
+# Those pods carry the azure.workload.identity/use=true label, so AAD must trust
+# the default SA subject for the federated token exchange to succeed. Without
+# this, blob auth fails with "WorkloadIdentityCredential: no client ID specified".
+###############################################################################
+resource "azurerm_federated_identity_credential" "anyscale_default_fic" {
+  count               = var.enable_operator_infrastructure ? 1 : 0
+  name                = "anyscale-default-fed"
+  resource_group_name = azurerm_resource_group.rg.name
+
+  parent_id = azurerm_user_assigned_identity.anyscale_operator[0].id
+  issuer    = azurerm_kubernetes_cluster.aks.oidc_issuer_url
+  subject   = "system:serviceaccount:${var.anyscale_operator_namespace}:default"
+  audience  = ["api://AzureADTokenExchange"]
+}
+###############################################################################
 # ROLE ASSIGNMENTS (IDENTITY ←→ STORAGE ACCOUNT)
 ###############################################################################
 moved {

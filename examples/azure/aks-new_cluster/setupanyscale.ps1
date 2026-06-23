@@ -2,6 +2,7 @@
 # FULL ANYSCALE AKS AUTOMATION
 # ============================================================
 
+$ErrorActionPreference = 'Stop'
 
 # ============================================================
 # CONFIGURATION
@@ -213,6 +214,10 @@ terraform init
 
 terraform apply -auto-approve | Tee-Object terraform-output.txt
 
+if ($LASTEXITCODE -ne 0) {
+    throw "Terraform apply failed with exit code $LASTEXITCODE"
+}
+
 # ============================================================
 # READ TERRAFORM OUTPUT
 # ============================================================
@@ -249,6 +254,7 @@ $StorageBucketName = Get-RegexValue "--cloud-storage-bucket-name '([^']+)'"
 $StorageBucketEndpoint = Get-RegexValue "--cloud-storage-bucket-endpoint '([^']+)'"
 
 $IamIdentity = Get-RegexValue '--set-string global.auth.iamIdentity=([^\s]+)'
+$OperatorClientId = Get-RegexValue 'anyscale_operator_client_id = "([^"]+)"'
 
 # ============================================================
 # AKS LOGIN
@@ -297,7 +303,17 @@ helm upgrade nvdp nvdp/nvidia-device-plugin `
 # REGISTER CLOUD
 # ============================================================
 
-$registrationOutput = Invoke-AnyscaleCommand "anyscale cloud register --name $CloudName --region $Region --provider azure --compute-stack k8s --azure-tenant-id $TenantId --anyscale-operator-iam-identity $OperatorIdentity --cloud-storage-bucket-name `"$StorageBucketName`" --cloud-storage-bucket-endpoint `"$StorageBucketEndpoint`""
+try {
+    $registrationOutput = Invoke-AnyscaleCommand "anyscale cloud register --name $CloudName --region $Region --provider azure --compute-stack k8s --azure-tenant-id $TenantId --anyscale-operator-iam-identity $OperatorIdentity --cloud-storage-bucket-name `"$StorageBucketName`" --cloud-storage-bucket-endpoint `"$StorageBucketEndpoint`""
+} catch {
+    # If cloud already exists (409 conflict), look up the existing cloud
+    if ($_.Exception.Message -match '409|already exists|conflict') {
+        Write-Host "Cloud '$CloudName' already exists. Retrieving existing cloud info..." -ForegroundColor Yellow
+        $registrationOutput = Invoke-AnyscaleCommand "anyscale cloud list --name $CloudName"
+    } else {
+        throw
+    }
+}
 
 # ============================================================
 # EXTRACT DEPLOYMENT ID
@@ -323,37 +339,30 @@ Write-Host ""
 # ============================================================
 
 helm upgrade anyscale-operator anyscale/anyscale-operator `
+    --version 1.5.1 `
     --set-string global.cloudDeploymentId=$CloudDeploymentId `
     --set-string global.controlPlaneURL=https://console.anyscale.com `
     --set-string global.cloudProvider=azure `
     --set-string global.auth.iamIdentity=$IamIdentity `
     --set-string global.auth.audience=api://086bc555-6989-4362-ba30-fded273e432b/.default `
     --set-string workloads.serviceAccount.name=anyscale-operator `
+    --set-string workloads.serviceAccount.annotations."azure\.workload\.identity/client-id"=$OperatorClientId `
     --namespace anyscale-operator `
     --create-namespace `
     --wait `
     -i
 
 # ============================================================
-# CREATE USERS YAML
+# WORKLOAD IDENTITY FOR RAY PODS
+# The Anyscale operator schedules Ray cluster/workspace pods under the
+# namespace's *default* ServiceAccount. Annotate it with the operator
+# managed-identity client-id so the azure-workload-identity webhook injects
+# AZURE_CLIENT_ID / the federated token into those pods. The matching
+# federated credential (anyscale-default-fed) is created by Terraform.
+# Without this, blob auth fails: "WorkloadIdentityCredential: no client ID specified".
 # ============================================================
-
-$yaml = @"
-create_users:
-  - name: $ODL_USERNAME
-    lastname: LabUser
-    email: $ODL_USER_EMAIL
-    password: ''
-    is_sso_user: true
-    title: Student
-"@
-
-$yaml | Out-File create_users.yaml -Encoding utf8
-
-# ============================================================
-# CREATE USER
-# ============================================================
-
+kubectl -n anyscale-operator annotate serviceaccount default `
+    "azure.workload.identity/client-id=$OperatorClientId" --overwrite
 
 $configfile = ".\compute-config.yaml"
 
@@ -398,12 +407,12 @@ Write-Host "========================================" -ForegroundColor Green
 
 
 # ============================================================
-# ENABLE H100 / G100 SUPPORT
+# ENABLE A10 GPU SUPPORT
 # ============================================================
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "Enabling H100/G100 Support"
+Write-Host "Enabling A10 GPU Support"
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -411,7 +420,7 @@ Write-Host ""
 # CREATE CUSTOM VALUES FILE
 # ============================================================
 
-$customValuesFile = "anyscale-h100-values.yaml"
+$customValuesFile = "anyscale-a10-values.yaml"
 
 $yaml = @"
 global:
@@ -424,16 +433,22 @@ global:
     iamIdentity: $IamIdentity
 
 workloads:
+  serviceAccount:
+    name: anyscale-operator
+    annotations:
+      azure.workload.identity/client-id: $OperatorClientId
   instanceTypes:
     additional:
 
-      36CPU-220GB-1xA10:
+      36CPU-288GB-1xA10:
         resources:
-          CPU: 36
+          # 34 (not 36): leave headroom below the 36 vCPU node for AKS system
+          # reservation + daemonsets, otherwise the pod never schedules.
+          CPU: 34
           GPU: 1
           memory: 288Gi
           accelerators:
-            - A10
+            - A10G
 
 patches:
   - kind: Pod
@@ -465,7 +480,8 @@ helm upgrade anyscale-operator anyscale/anyscale-operator `
     -n anyscale-operator `
     --version 1.5.1 `
     -f $customValuesFile `
-    --dry-run=client
+    --reuse-values `
+    --dry-run=server
 
 if ($LASTEXITCODE -ne 0) {
     throw "Helm dry-run failed."
@@ -476,17 +492,18 @@ if ($LASTEXITCODE -ne 0) {
 # ============================================================
 
 Write-Host ""
-Write-Host "Applying H100 operator upgrade..." -ForegroundColor Yellow
+Write-Host "Applying A10 operator upgrade..." -ForegroundColor Yellow
 
 helm upgrade anyscale-operator anyscale/anyscale-operator `
     -n anyscale-operator `
     --version 1.5.1 `
     -f $customValuesFile `
-    --force `
+    --reuse-values `
+    --force-conflicts `
     --wait
 
 if ($LASTEXITCODE -ne 0) {
-    throw "Failed to upgrade Anyscale operator with H100 support."
+    throw "Failed to upgrade Anyscale operator with A10 support."
 }
 
 # ============================================================
@@ -494,7 +511,7 @@ if ($LASTEXITCODE -ne 0) {
 # ============================================================
 
 Write-Host ""
-Write-Host "Validating H100 registration..." -ForegroundColor Yellow
+Write-Host "Validating A10 registration..." -ForegroundColor Yellow
 
 kubectl -n anyscale-operator get cm instance-types `
     -o jsonpath='{.data.instance_types\.yaml}'
@@ -525,25 +542,41 @@ kubectl get pods -n anyscale-operator
 # ============================================================
 
 Write-Host ""
-Write-Host "Checking H100 nodepool autoscaling..." -ForegroundColor Yellow
+Write-Host "Checking A10 nodepool autoscaling..." -ForegroundColor Yellow
 
 az aks nodepool show `
     -g $RESOURCE_GROUP `
     --cluster-name $AKS_CLUSTER_NAME `
-    -n gpuh100 `
+    -n gpua10 `
     --query "{enableAutoScaling:enableAutoScaling,minCount:minCount,maxCount:maxCount}" `
     -o table
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Green
-Write-Host "H100/G100 Enablement Completed"
+Write-Host "A10 GPU Enablement Completed"
 Write-Host "========================================" -ForegroundColor Green
 
 
 
-Invoke-AnyscaleCommand "anyscale compute-config create -n g100 -f compute-config.yaml"
+try {
+    Invoke-AnyscaleCommand "anyscale compute-config create -n g100 -f compute-config.yaml"
+} catch {
+    if ($_.Exception.Message -match '409|already exists|conflict') {
+        Write-Host "Compute config 'g100' already exists. Skipping creation." -ForegroundColor Yellow
+    } else {
+        throw
+    }
+}
 
-Invoke-AnyscaleCommand "anyscale workspace_v2 create -f workspace-config.yaml"
+try {
+    Invoke-AnyscaleCommand "anyscale workspace_v2 create -f workspace-config.yaml"
+} catch {
+    if ($_.Exception.Message -match '409|already exists|conflict') {
+        Write-Host "Workspace already exists. Skipping creation." -ForegroundColor Yellow
+    } else {
+        throw
+    }
+}
 
 
 

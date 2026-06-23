@@ -4,6 +4,6 @@ head_node:
   instance_type: 8CPU-32GB
 
 worker_nodes:
-  - instance_type: 36CPU-288GB-1xH100
+  - instance_type: 36CPU-288GB-1xA10
     min_nodes: 1
     max_nodes: 1

@@ -3,8 +3,10 @@ workloads:
     additional:
       1xA10:
         resources:
-          CPU: 36
+          # 34 (not 36): leave headroom below the 36 vCPU node for AKS system
+          # reservation + daemonsets, otherwise the pod never schedules.
+          CPU: 34
           GPU: 1
           memory: 288Gi
           accelerators:
-            - A10
+            - A10G
