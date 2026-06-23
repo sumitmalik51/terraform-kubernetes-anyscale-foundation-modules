@@ -163,6 +163,7 @@ variable "gpu_pool_configs" {
        vm_size      = "Standard_NV36ads_A10_v5"
        product_name = "NVIDIA-A10"
        gpu_count    = "1"
+	min_count    = 1
      }
     # H100 = {
     #   name         = "h100x8"
