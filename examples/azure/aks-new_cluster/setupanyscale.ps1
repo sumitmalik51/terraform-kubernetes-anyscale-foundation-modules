@@ -22,7 +22,7 @@ $azuserobjectid = $env:azuserobjectid
 # Azure
 $AZURE_SUBSCRIPTION_ID = $env:AzureSubscriptionID
 $AZURE_TENANT_ID       = $env:AzureTenantID
-$AZURE_REGION          = "spaincentral"
+$AZURE_REGION          = "indonesiacentral"
 
 # ODL User
 az login --service-principal --username $env:AppID --password $env:AppSecret --tenant $env:AzureTenantID
