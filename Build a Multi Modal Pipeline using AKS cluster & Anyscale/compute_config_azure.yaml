@@ -1,0 +1,44 @@
+# Anyscale Compute Config -- odl_user_2298227_cloud
+#
+# Derived from kubectl `nodes.yaml` showing the actual AKS pools on this cloud:
+#
+#   agentpool=cpu16   -> Standard_D16s_v5         (16 CPU,  64 GB RAM)
+#   agentpool=gpua10  -> Standard_NV36ads_A10_v5  (36 CPU, 440 GB, 1x A10 24GB)
+#   agentpool=sys     -> Standard_D2s_v5          (kube-system, NoSchedule)
+#
+# On Anyscale-on-Kubernetes, an "instance_type" is a pod *resource shape*
+# matched to an entry in the cloud operator's registry, NOT a VM SKU.
+# Probing this cloud's operator confirmed these registered types:
+#
+#   8CPU-32GB             -> lands on cpu16 (Standard_D16s_v5) pods
+#   36CPU-288GB-1xA10     -> lands on gpua10 (A10 GPU) pods
+#
+# We use the A10-named GPU type (matches the actual hardware -- there are no
+# H100s on this cloud). Each GPU pod hosts the four fractional-GPU Ray Serve
+# replicas (num_gpus=0.25) from serve_app.py, sharing the single physical A10.
+
+cloud: odl_user_2298227_cloud
+
+# Head: control plane (Ray GCS, Serve controller). Largest non-GPU shape
+# registered on this cloud; lands on the cpu16 pool via operator scheduling.
+head_node:
+  instance_type: 8CPU-32GB
+
+worker_nodes:
+
+  # GPU worker pool -> gpua10 (1x A10, 24 GB VRAM).
+  # min=1 keeps a warm GPU node so the first request doesn't pay node-
+  # provisioning latency; max=2 covers up to 8 fractional-GPU replicas
+  # (2 nodes * 4 fractional replicas per GPU).
+  - name: gpu-a10
+    instance_type: 36CPU-288GB-1xA10
+    min_nodes: 1
+    max_nodes: 2
+
+  # CPU worker pool -> cpu16 (Standard_D16s_v5).
+  # Spillover for ContentFilter + ContentPipeline replicas if the head fills.
+  # min=0 to avoid idle cost when traffic is low.
+  - name: cpu
+    instance_type: 8CPU-32GB
+    min_nodes: 0
+    max_nodes: 3

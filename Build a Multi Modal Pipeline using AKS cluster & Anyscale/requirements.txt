@@ -1,0 +1,11 @@
+# Multi-Model Content Pipeline — Dependencies
+#
+# torch is intentionally NOT listed. The deploy image
+# `anyscale/ray-llm:2.56.0-py312-cu130` already ships a torch built for CUDA
+# 13.0 that matches the cloud's NVIDIA R580 driver. Adding a torch pin (or a
+# PyTorch extra-index-url) risks overriding the image's wheel with a mismatched
+# build and crashing the GPU replicas with "NVIDIA driver too old".
+transformers>=4.40.0
+numpy>=1.24.0
+fastapi>=0.100.0
+requests>=2.28.0

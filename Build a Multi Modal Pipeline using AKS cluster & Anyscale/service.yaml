@@ -1,0 +1,87 @@
+# Anyscale Service Configuration — Multi-Model Content Pipeline
+#
+# Deploy with:
+#   anyscale service deploy -f service.yaml
+#
+# Instance types: Uses Anyscale instance categories (CPU-only, A10 GPU).
+# Verify available types in your Anyscale console → Add worker nodes dropdown.
+
+name: multi-model-content-pipeline-2298227
+
+applications:
+  - name: default
+    import_path: serve_app:app
+    route_prefix: /
+    deployments:
+
+      # ── Orchestrator (CPU) ──
+      - name: ContentPipeline
+        num_replicas: auto
+        autoscaling_config:
+          min_replicas: 1
+          max_replicas: 5
+          target_ongoing_requests: 30
+        ray_actor_options:
+          num_cpus: 1
+
+      # ── Business Logic (CPU) ──
+      - name: ContentFilter
+        num_replicas: auto
+        autoscaling_config:
+          min_replicas: 1
+          max_replicas: 8
+          target_ongoing_requests: 25
+        ray_actor_options:
+          num_cpus: 1
+
+      # ── Sentiment (fractional GPU) ──
+      # DistilBERT ~250MB. 0.25 GPU shares with Summarizer.
+      - name: SentimentClassifier
+        num_replicas: auto
+        autoscaling_config:
+          min_replicas: 1
+          max_replicas: 4
+          target_ongoing_requests: 5
+          downscale_delay_s: 300
+        ray_actor_options:
+          num_gpus: 0.25
+          num_cpus: 1
+
+      # ── Summarizer (fractional GPU) ──
+      # DistilBART-CNN ~1.2GB. 0.25 GPU — both GPU models share 1 GPU.
+      - name: Summarizer
+        num_replicas: auto
+        autoscaling_config:
+          min_replicas: 1
+          max_replicas: 4
+          target_ongoing_requests: 3
+          downscale_delay_s: 300
+        ray_actor_options:
+          num_gpus: 0.25
+          num_cpus: 1
+
+# =============================================================================
+# Compute Configuration
+# =============================================================================
+#
+# Reference the named compute config built from nodes.yaml. See
+# compute_config_azure.yaml in this directory for the source definition.
+# Registered with Anyscale via:
+#   anyscale compute-config create -n multi-modal-2298227 -f compute_config_azure.yaml
+
+compute_config: multi-modal-2298227:2
+
+# Container image
+#
+# ray-llm:2.56.0-py312-cu130 — Ray 2.56 + Python 3.12 on CUDA 13.0. The cloud's
+# A10 nodes run NVIDIA driver R580 (per `aks-gpu-cuda:580.126.09-*` in
+# nodes.yaml), which supports CUDA 13. The image ships its own torch built for
+# cu130, so requirements.txt does NOT pin torch — letting the image's wheel win
+# avoids the cu-mismatch crashes seen with an older driver + cu128 pin.
+image_uri: anyscale/ray-llm:2.56.0-py312-cu130
+
+working_dir: .
+
+# requirements.txt holds non-torch deps (transformers, fastapi, etc.). torch is
+# intentionally absent so the image's preinstalled cu130 build is used as-is.
+requirements: requirements.txt

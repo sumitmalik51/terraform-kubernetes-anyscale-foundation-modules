@@ -558,25 +558,86 @@ Write-Host "========================================" -ForegroundColor Green
 
 
 
+# ============================================================
+# WORKSPACE SETUP (CPU-only -- no GPU assigned)
+# ============================================================
+#
+# Spin up a development workspace WITHOUT a GPU: enough to load code, install
+# deps, and iterate. GPU nodes are added back only when serving the
+# SentimentClassifier / Summarizer replicas. These commands only *create* the
+# workspace -- it is started manually afterwards (see the start command below).
+# ============================================================
+
+Write-Host ""
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "Workspace Setup (CPU-only)"
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host ""
+
+# -- Generate the CPU-only compute config (cloud bound dynamically) ----------
+$WorkspaceComputeConfigFile = "workspace-compute-config.yaml"
+
+$workspaceComputeYaml = @"
+cloud: $CloudName
+
+# CPU-only control plane + workers. min_nodes: 0 so the workspace costs nothing
+# extra when idle; workers scale up on demand and back down to zero.
+head_node:
+  instance_type: 8CPU-32GB
+
+worker_nodes:
+  - instance_type: 8CPU-32GB
+    min_nodes: 0
+    max_nodes: 4
+"@
+
+$workspaceComputeYaml | Out-File $WorkspaceComputeConfigFile -Encoding utf8
+
+Write-Host "Generated: $WorkspaceComputeConfigFile" -ForegroundColor Green
+
+# -- Generate requirements.txt for the workspace image -----------------------
+$RequirementsFile = "requirements.txt"
+
+$requirementsContent = @"
+transformers>=4.40.0
+numpy>=1.24.0
+fastapi>=0.100.0
+requests>=2.28.0
+"@
+
+$requirementsContent | Out-File $RequirementsFile -Encoding utf8
+
+Write-Host "Generated: $RequirementsFile" -ForegroundColor Green
+
+# -- 1. Create the compute configuration -------------------------------------
 try {
-    Invoke-AnyscaleCommand "anyscale compute-config create -n g100 -f compute-config.yaml"
+    Invoke-AnyscaleCommand "anyscale compute-config create -n workspace-compute-config -f workspace-compute-config.yaml"
 } catch {
     if ($_.Exception.Message -match '409|already exists|conflict') {
-        Write-Host "Compute config 'g100' already exists. Skipping creation." -ForegroundColor Yellow
+        Write-Host "Compute config 'workspace-compute-config' already exists. Skipping creation." -ForegroundColor Yellow
     } else {
         throw
     }
 }
 
+# -- 2. Create the workspace (CPU-only; not started) -------------------------
 try {
-    Invoke-AnyscaleCommand "anyscale workspace_v2 create -f workspace-config.yaml"
+    Invoke-AnyscaleCommand "anyscale workspace_v2 create --name multi-model-pipeline-workspace --image-uri anyscale/ray-llm:2.56.0-py312-cu130 --compute-config workspace-compute-config:1 --requirements requirements.txt"
 } catch {
     if ($_.Exception.Message -match '409|already exists|conflict') {
-        Write-Host "Workspace already exists. Skipping creation." -ForegroundColor Yellow
+        Write-Host "Workspace 'multi-model-pipeline-workspace' already exists. Skipping creation." -ForegroundColor Yellow
     } else {
         throw
     }
 }
+
+# -- 3. Start it manually ----------------------------------------------------
+# `workspace_v2 create` only registers the workspace; it does not start it.
+# Start it from the Anyscale console, or via the CLI shown below.
+Write-Host ""
+Write-Host "Workspace 'multi-model-pipeline-workspace' created (not started)." -ForegroundColor Green
+Write-Host "Start it manually when ready:" -ForegroundColor Cyan
+Write-Host "    anyscale workspace_v2 start -n multi-model-pipeline-workspace" -ForegroundColor White
 
 
 

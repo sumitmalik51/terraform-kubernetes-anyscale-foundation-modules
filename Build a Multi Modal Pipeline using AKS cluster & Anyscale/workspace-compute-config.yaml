@@ -1,0 +1,44 @@
+# =============================================================================
+# Anyscale Compute Config — workspace-compute-config (Azure, CPU-only)
+# =============================================================================
+#
+# Cluster shape for spinning up a workspace_v2 on `odl_user_2298227_cloud`
+# (cld_d8z3s9fkwjaa1pt8agy86v9hwk) with NO GPU nodes -- enough to load code,
+# install deps, and iterate. Add a GPU worker pool back when you need to run
+# the SentimentClassifier / Summarizer replicas (see commented block below).
+#
+# Instance type names use the operator-registered pod shapes on this cloud:
+#   • 8CPU-32GB           -> CPU-only (lands on cpu16 pool, Standard_D16s_v5)
+#   • 36CPU-288GB-1xA10   -> A10 GPU nodes (gpua10 pool, 1x A10 24GB)
+#
+# NOTE: instance type names cannot contain ':' -- it collides with the
+# cluster-validation query parser. The ':' form returned by `ray status`
+# (e.g. `1xA10-24G:36CPU-440GB`) is rejected at cluster launch.
+#
+# Register with:
+#   anyscale compute-config create -n workspace-compute-config -f workspace-compute-config.yaml
+# =============================================================================
+
+cloud: odl_user_2298227_cloud
+
+# -- Head Node -----------------------------------------------------------------
+#
+# CPU-only control plane: Ray GCS, autoscaler, dashboard.
+# 8CPU-32GB shape lands on the cpu16 pool (Standard_D16s_v5).
+head_node:
+  instance_type: 8CPU-32GB
+
+# -- Worker Node Pools ---------------------------------------------------------
+#
+# CPU-only. min_nodes: 0 so the workspace costs nothing extra when idle --
+# workers spin up on demand, scale back to zero when not in use.
+worker_nodes:
+  - instance_type: 8CPU-32GB
+    min_nodes: 0
+    max_nodes: 4
+
+# -- GPU pool (commented out -- add back when serving the GPU replicas) -------
+#
+#  - instance_type: 36CPU-288GB-1xA10
+#    min_nodes: 1
+#    max_nodes: 4

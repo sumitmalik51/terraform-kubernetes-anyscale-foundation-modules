@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Jupyter / Notebooks
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Ray
+/tmp/ray/
+/tmp/ray_session_*
+.ray/
+
+# IDE / Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local / secrets (do not commit)
+.env
+.env.local
+*.pem
+
+# Anyscale / local overrides (optional)
+# service.local.yaml
